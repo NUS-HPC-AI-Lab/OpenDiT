@@ -10,6 +10,7 @@
 Sample new images from a pre-trained DiT.
 """
 import argparse
+from contextlib import nullcontext
 
 import torch
 from diffusers.models import AutoencoderKL
@@ -19,8 +20,13 @@ from opendit.diffusion import create_diffusion
 from opendit.models.dit import DiT_models
 from opendit.models.latte import Latte_models
 from opendit.utils.download import find_model
+from opendit.utils.import_utils import is_accelerate_available, is_huggingface_hub_available
 from opendit.vae.reconstruct import save_sample
 from opendit.vae.wrapper import AutoencoderKLWrapper
+
+if is_accelerate_available():
+    from accelerate import init_empty_weights
+    from accelerate.utils import set_module_tensor_to_device
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -34,6 +40,12 @@ def main(args):
 
     if args.ckpt is None:
         raise ValueError("Please specify a checkpoint path with --ckpt.")
+
+    if args.hub_repo_id is not None:
+        if not is_huggingface_hub_available():
+            raise ValueError(
+                "Providing `--hub_repo_id` requires the `huggingface_hub` library installed. Install it using `pip install huggingface_hub`."
+            )
 
     # Load model:
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
@@ -63,23 +75,29 @@ def main(args):
         model_class = Latte_models[args.model]
     else:
         raise ValueError(f"Unknown model {args.model}")
-    model = (
-        model_class(
-            input_size=input_size,
-            num_classes=args.num_classes,
-            enable_flashattn=False,
-            enable_layernorm_kernel=False,
-            dtype=dtype,
-            text_encoder=args.text_encoder,
-        )
-        .to(device)
-        .to(dtype)
-    )
+
+    if not args.use_video and "DiT" in args.model:
+        init_ctx = init_empty_weights if is_accelerate_available() else nullcontext
+        with init_ctx():
+            model = model_class(
+                input_size=input_size,
+                num_classes=args.num_classes,
+                enable_flashattn=False,
+                enable_layernorm_kernel=False,
+                dtype=dtype,
+                text_encoder=args.text_encoder,
+            )
+
+    model = model.to(device=device, dtype=dtype)
 
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt
     state_dict = find_model(ckpt_path)
-    model.load_state_dict(state_dict)
+    if not args.use_video and "DiT" in args.model and is_accelerate_available():
+        for param_name, param in state_dict.items():
+            set_module_tensor_to_device(model, param_name, "cpu", value=param)
+    else:
+        model.load_state_dict(state_dict)
     model.eval()  # important!
     diffusion = create_diffusion(str(args.num_sampling_steps))
 

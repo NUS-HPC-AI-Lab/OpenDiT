@@ -7,15 +7,21 @@
 """
 Functions for downloading pre-trained DiT models
 """
-import os
 import json
+import os
+
 import torch
 from torchvision.datasets.utils import download_url
+
+from opendit.utils.import_utils import is_huggingface_hub_available
+
+if is_huggingface_hub_available():
+    from huggingface_hub import hf_hub_download
 
 pretrained_models = {"DiT-XL-2-512x512.pt", "DiT-XL-2-256x256.pt"}
 
 
-def find_model(model_name):
+def find_model(model_name, repo_id=None):
     """
     Finds a pre-trained DiT model, downloading it if necessary. Alternatively, loads a model from a local path.
     """
@@ -30,16 +36,16 @@ def find_model(model_name):
             assert len(index_file) == 1, f"Could not find index.json in {model_name}"
 
             # process index json
-            with open (index_file[0], "r") as f:
+            with open(index_file[0], "r") as f:
                 index_data = json.load(f)
 
             bin_to_weight_mapping = dict()
-            for k, v in index_data['weight_map'].items():
+            for k, v in index_data["weight_map"].items():
                 if v in bin_to_weight_mapping:
                     bin_to_weight_mapping[v].append(k)
                 else:
                     bin_to_weight_mapping[v] = [k]
-            
+
             # make state dict
             state_dict = dict()
             for bin_name, weight_list in bin_to_weight_mapping.items():
@@ -47,11 +53,19 @@ def find_model(model_name):
                 bin_state_dict = torch.load(bin_path, map_location=lambda storage, loc: storage)
                 for weight in weight_list:
                     state_dict[weight] = bin_state_dict[weight]
-            return state_dict            
+            return state_dict
         else:
-            # if it is a file, we just load it directly in the typical PyTorch manner
-            assert os.path.exists(model_name), f"Could not find DiT checkpoint at {model_name}"
-            checkpoint = torch.load(model_name, map_location=lambda storage, loc: storage)
+            if repo_id is None:
+                # if it is a file, we just load it directly in the typical PyTorch manner
+                assert os.path.exists(model_name), f"Could not find DiT checkpoint at {model_name}"
+                checkpoint = torch.load(model_name, map_location=lambda storage, loc: storage)
+
+            else:
+                model_name = hf_hub_download(
+                    repo_id=repo_id, filename=model_name
+                )  # Load from the HF Hub. Takes care of caching.
+                checkpoint = torch.load(model_name, map_location=lambda storage, loc: storage)
+
             if "ema" in checkpoint:  # supports checkpoints from train.py
                 checkpoint = checkpoint["ema"]
             return checkpoint

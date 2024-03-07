@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from glob import glob
+from pathlib import Path
 
 import colossalai
 import torch
@@ -29,11 +30,15 @@ from opendit.models.dit import DiT_models
 from opendit.models.latte import Latte_models
 from opendit.utils.ckpt_utils import create_logger, load, record_model_param_shape, save
 from opendit.utils.data_utils import prepare_dataloader
+from opendit.utils.import_utils import is_huggingface_hub_available
 from opendit.utils.operation import model_sharding
 from opendit.utils.pg_utils import ProcessGroupManager
 from opendit.utils.train_utils import all_reduce_mean, format_numel_str, get_model_numel, requires_grad, update_ema
 from opendit.utils.video_utils import DatasetFromCSV, get_transforms_image, get_transforms_video
 from opendit.vae.wrapper import AutoencoderKLWrapper
+
+if is_huggingface_hub_available():
+    from huggingface_hub import create_repo, upload_folder
 
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -80,6 +85,18 @@ def main(args):
         tensorboard_dir = f"{experiment_dir}/tensorboard"
         os.makedirs(tensorboard_dir, exist_ok=True)
         writer = SummaryWriter(tensorboard_dir)
+
+    # ==============================
+    # Resolve repository creation.
+    # ==============================
+    if coordinator.is_master():
+        if args.push_to_hub:
+            if not is_huggingface_hub_available():
+                raise ValueError(
+                    "--push_to_hub option needs the `huggingface_hub` library. Install it using `pip install huggingface_hub`."
+                )
+
+            repo_id = create_repo(repo_id=args.hub_model_id or Path(args.experiment_dir).name, exist_ok=True).repo_id
 
     # ==============================
     # Initialize Booster
@@ -337,6 +354,13 @@ def main(args):
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
 
+    if coordinator.is_master():
+        upload_folder(
+            repo_id=repo_id,
+            folder_path=experiment_dir,
+            commit_message="End of training",
+        )
+
     logger.info("Done!")
 
 
@@ -375,6 +399,13 @@ if __name__ == "__main__":
     parser.add_argument("--enable_flashattn", action="store_true", help="Enable flashattn kernel")
     parser.add_argument("--sequence_parallel_size", type=int, default=1, help="Sequence parallel size, enable if > 1")
     parser.add_argument("--sequence_parallel_type", type=str)
+
+    parser.add_argument(
+        "--push_to_hub", action="store_true", help="Whether to push the model files to the HF Hub after training."
+    )
+    parser.add_argument(
+        "--hub_model_id", type=str, default=None, help="ID of the repository to which the model files will be pushed."
+    )
 
     args = parser.parse_args()
     main(args)
