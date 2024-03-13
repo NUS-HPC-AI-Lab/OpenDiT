@@ -27,6 +27,8 @@ from tqdm import tqdm
 from opendit.diffusion import create_diffusion
 from opendit.models.dit import DiT_models
 from opendit.models.latte import Latte_models
+from opendit.models.mmdit import MMDiT_models
+from opendit.models.mmdit_latte import MMLatte_models
 from opendit.utils.ckpt_utils import create_logger, load, record_model_param_shape, save
 from opendit.utils.data_utils import prepare_dataloader
 from opendit.utils.operation import model_sharding
@@ -145,16 +147,19 @@ def main(args):
         "text_encoder": args.text_encoder,
     }
 
+    if 'MM' in args.model:
+        model_config = {**model_config, 't5_text_encoder': args.t5_text_encoder}
+
     # Create DiT model
     if "DiT" in args.model:
         if "VDiT" in args.model:
             assert args.use_video, "VDiT model requires video data"
         else:
             assert not args.use_video, "DiT model requires image data"
-        model_class = DiT_models[args.model]
+        model_class = DiT_models[args.model] if 'MM' not in args.model else MMDiT_models[args.model]
     elif "Latte" in args.model:
         assert args.use_video, "Latte model requires video data"
-        model_class = Latte_models[args.model]
+        model_class = Latte_models[args.model] if 'MM' not in args.model else MMLatte_models[args.model]
     else:
         raise ValueError(f"Unknown model {args.model}")
     model = (
@@ -343,7 +348,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, choices=list(DiT_models.keys()) + list(Latte_models.keys()), default="DiT-XL/2"
+        "--model", type=str, choices=list(DiT_models.keys()) + list(Latte_models.keys()) + list(MMDiT_models.keys()) + list(MMLatte_models.keys()), default="DiT-XL/2"
     )
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--use_video", action="store_true", help="Use video data instead of images")
@@ -353,6 +358,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_frames", type=int, default=16)
     parser.add_argument("--frame_interval", type=int, default=1)
     parser.add_argument("--text_encoder", type=str, default="openai/clip-vit-base-patch32")
+    parser.add_argument("--t5_text_encoder", type=str, default="google-t5/t5-small")
 
     parser.add_argument("--data_path", type=str, default="./datasets", help="Path to the dataset")
     parser.add_argument("--image_size", type=int, choices=[256, 512], default=256)
