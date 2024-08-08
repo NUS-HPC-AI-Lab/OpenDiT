@@ -65,7 +65,7 @@ def main(args):
     # == init distributed env ==
     colossalai.launch_from_torch({})
     coordinator = DistCoordinator()
-    set_parallel_manager(1, coordinator.world_size)
+    set_parallel_manager(coordinator.world_size)
     device = f"cuda:{torch.cuda.current_device()}"
 
     if args.cross_broadcast or args.spatial_broadcast or args.temporal_broadcast:

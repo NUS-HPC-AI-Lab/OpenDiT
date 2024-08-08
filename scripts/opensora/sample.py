@@ -45,7 +45,7 @@ def main(args):
     # == init distributed env ==
     colossalai.launch_from_torch({})
     coordinator = DistCoordinator()
-    set_parallel_manager(1, coordinator.world_size)
+    set_parallel_manager(coordinator.world_size)
     enable_sequence_parallelism = enable_sequence_parallel()
     device = f"cuda:{torch.cuda.current_device()}"
     set_seed(seed=args.seed)

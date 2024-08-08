@@ -3,7 +3,6 @@ version: 65x512x512
 num_frames: 65
 height: 512
 width: 512
-cache_dir: "./cache_dir"
 text_encoder_name: DeepFloyd/t5-v1_1-xxl
 text_prompt: [
   "Time Lapse of the rising sun over a tree in an open rural landscape, with clouds in the blue sky beautifully playing with the rays of light",

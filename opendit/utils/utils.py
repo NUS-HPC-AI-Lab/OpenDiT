@@ -35,6 +35,20 @@ def str_to_dtype(x: str):
         raise RuntimeError(f"Only fp32, fp16 and bf16 are supported, but got {x}")
 
 
+def batch_func(func, *args):
+    """
+    Apply a function to each element of a batch.
+    """
+    batch = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and arg.shape[0] == 2:
+            batch.append(func(arg))
+        else:
+            batch.append(arg)
+
+    return batch
+
+
 def merge_args(args1, args2):
     """
     Merge two argparse Namespace objects.

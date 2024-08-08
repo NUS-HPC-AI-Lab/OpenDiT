@@ -11,6 +11,7 @@
 import json
 import os
 from dataclasses import dataclass
+from functools import partial
 from importlib import import_module
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -57,7 +58,14 @@ from opendit.core.comm import (
     split_sequence,
 )
 from opendit.core.pab_mgr import enable_pab, if_broadcast_cross, if_broadcast_spatial, if_broadcast_temporal
-from opendit.core.parallel_mgr import enable_sequence_parallel, get_sequence_parallel_group
+from opendit.core.parallel_mgr import (
+    enable_sequence_parallel,
+    get_data_parallel_group,
+    get_data_parallel_rank,
+    get_data_parallel_size,
+    get_sequence_parallel_group,
+)
+from opendit.utils.utils import batch_func
 
 if is_xformers_available():
     import xformers
@@ -2396,6 +2404,25 @@ class LatteT2V(ModelMixin, ConfigMixin):
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
             `tuple` where the first element is the sample tensor.
         """
+        # 0. Split batch
+        if get_data_parallel_size() > 1:
+            conditional = get_data_parallel_rank() == 0
+            (
+                hidden_states,
+                timestep,
+                encoder_hidden_states,
+                class_labels,
+                attention_mask,
+                encoder_attention_mask,
+            ) = batch_func(
+                partial(split_sequence, process_group=get_data_parallel_group(), dim=0),
+                hidden_states,
+                timestep,
+                encoder_hidden_states,
+                class_labels,
+                attention_mask,
+                encoder_attention_mask,
+            )
         input_batch_size, c, frame, h, w = hidden_states.shape
         frame = frame - use_image_num  # 20-4=16
         hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w").contiguous()
@@ -2675,6 +2702,10 @@ class LatteT2V(ModelMixin, ConfigMixin):
                 shape=(-1, self.out_channels, height * self.patch_size, width * self.patch_size)
             )
             output = rearrange(output, "(b f) c h w -> b c f h w", b=input_batch_size).contiguous()
+
+        # 3. Gather batch for data parallelism
+        if get_data_parallel_size() > 1:
+            output = gather_sequence(output, get_data_parallel_group(), dim=0)
 
         if not return_dict:
             return (output,)
